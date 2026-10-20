@@ -90,30 +90,53 @@
 - **Features never lost**: the Discovery device holds every field ever read
   plus every feature of the created device (`gladys.devices`), so a sensor
   warming up never makes the core see a changed structure.
-- **Pace**: 2 minutes by default (1 to 60); one read at a time across all
-  air-Q (the test button waits its turn); `/config` once per address (and
-  after a password change), then one request per read.
+- **Pace (review 1, I1)**: 2 minutes by default (1 to 60); one read at a time
+  across all air-Q (the test button waits its turn). The instant of every
+  request is recorded (and persisted) before it leaves; nothing reads an
+  air-Q before that instant + the interval: not the test button (before it,
+  the button answers with the last values and the time of the next possible
+  read), a reconnection, a saved configuration (the next read is
+  recomputed from the last request and the new interval) nor a restart.
+  Only a new address or a new password (told apart after a restart by its
+  fingerprint) is read at once.
+- **Identity of the values (review 1, I2)**: `/config` is read at the first
+  read and again after any failure (the address may lead to another air-Q
+  after a power cut, two devices swapping their DHCP addresses); the
+  `DeviceID` of each `/data` / `/average` document must be the id of the
+  device, else nothing is published, the read counts as a failure and
+  `/config` is read at the next attempt (within the interval). An address
+  that now leads to another id becomes that device (fields reset), never
+  the first one.
+- **Disconnection during a read (review 1, M1)**: the attempt is recorded
+  anyway; a 429/5xx answered meanwhile is kept when the address and the
+  password are unchanged; only the values and a refusal are dropped.
 - **Errors**: a passing failure (network, another HTTP status, not an air-Q
   answer) is retried at the interval, never sooner; 429/5xx pause the device
   (`Retry-After`, else 5 min doubling, clamped to 1 min - 6 h, never shorter
   than the interval); a content that does not open is a refused password:
-  no read for 6 hours (the test button may try at once, never during a
-  429/5xx pause), at once with a new password. The outcome of a read of a
-  previous configuration never touches the current one.
+  no periodic read for 6 hours (the test button may try once the interval
+  has passed, never during a 429/5xx pause), at once with a new password
+  (which also reads `/config` again, review 1, M2).
 - **Persisted state (`/data/air-q-state.json`)**: per configured address,
-  the end of the pause, the 429/5xx streak, the end of the refusal and, for
-  a refusal only, a salted scrypt fingerprint of the password (16 bytes, a
-  random salt per file) to know after a restart whether it is still the
-  refused password. Never the password. Times read back are capped at a
-  fresh pause (6 h). Written atomically; an unreadable file is warned once
-  and ignored; a write failure is warned once, then memory only.
-- **A reconnection to Gladys** (`connected`) keeps the pauses, the refusals,
-  the device info and the due times; the status and the Discovery list are
+  the instant of the last request, the end of the pause, the 429/5xx
+  streak, the end of the refusal, the device info (id, name, model,
+  software version) and its fields (not secret: the Discovery list is not
+  empty after a restart, and the status is "connected" after a restart that
+  follows a success), and a salted scrypt fingerprint of the configured
+  password (16 bytes, a random salt per file) to tell a new password from
+  the same one after a restart. Never the password. Times read back are
+  capped (a last request never in the future, a pause at most 6 h), the
+  info and fields are re-validated. Written atomically, once per request
+  at most; an unreadable file is warned once and ignored; a write failure
+  is warned once, then memory only.
+- **A reconnection to Gladys** (`connected`) keeps the pace, the pauses, the
+  refusals and the device info; the status and the Discovery list are
   published again every time (the core keeps them in memory only).
 - **Secrets**: the password is described as "kept by Gladys in its database,
   never shown again"; it never leaves the integration (it only opens the
-  answers), is never logged (messages scrubbed as well), never in `/data`,
-  a status or an error. The docs never call a secret field "encrypted".
+  answers), is never logged (messages scrubbed as well), never in `/data`
+  (its salted fingerprint only), a status or an error. The docs never call
+  a secret field "encrypted".
 - **Bounded answers**: 256 KB, 10 s per request; error messages carry the
   host and a short reason only.
 

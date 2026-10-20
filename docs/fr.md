@@ -78,11 +78,23 @@ n'envoie pas n'est simplement pas créée) :
 
 ## À quel rythme l'air-Q est lu
 
-- Au démarrage, `GET /config` (l'identifiant et le nom de l'appareil) puis
-  `GET /average` (ou `/data`) ; ensuite une requête par air-Q à chaque
-  intervalle. Une reconnexion à Gladys ne lit rien de plus que ce qui est dû.
+- Une requête par air-Q à chaque intervalle : `GET /average` (ou `/data`),
+  précédée de `GET /config` (l'identifiant et le nom de l'appareil) à la
+  première lecture et après tout échec, car l'adresse peut alors mener à un
+  autre air-Q.
+- **Jamais plus vite que l'intervalle**, compté depuis la dernière requête
+  envoyée : ni par le bouton de test, ni par une reconnexion à Gladys, ni
+  par un enregistrement de la configuration, ni par un redémarrage du
+  conteneur. Seuls une nouvelle adresse ou un nouveau mot de passe sont lus
+  tout de suite. Avant la fin de l'intervalle, le bouton de test affiche les
+  dernières valeurs et l'heure de la prochaine lecture possible.
 - **Lecture seule** : l'intégration n'écrit jamais sur l'air-Q (aucun
   changement de configuration, aucun clignotement, aucun redémarrage).
+- **Les valeurs appartiennent à l'appareil qui les a mesurées** : chaque
+  réponse porte l'identifiant de l'air-Q ; si un autre air-Q répond
+  désormais à l'adresse (deux appareils dont la box a échangé les adresses),
+  rien n'est publié jusqu'à ce que son identifiant soit relu, puis sous son
+  propre appareil.
 - Un échec (pas de réponse, autre statut HTTP, réponse qui n'est pas celle
   d'un air-Q) est réessayé à l'intervalle suivant, jamais plus tôt.
 - Quand l'air-Q répond **429 ou 5xx** (occupé, en redémarrage), il est
@@ -91,12 +103,15 @@ n'envoie pas n'est simplement pas créée) :
   moins que l'intervalle.
 - Quand le **mot de passe ne convient pas** (la réponse ne s'ouvre pas), les
   lectures de cet air-Q s'arrêtent et le statut le dit ; un nouvel essai
-  toutes les 6 heures (le bouton de test peut réessayer tout de suite),
-  jusqu'à ce que vous changiez le mot de passe.
-- Les pauses et les refus survivent à une reconnexion à Gladys et à un
-  redémarrage du conteneur : ils sont gardés dans un fichier sous `/data`
-  avec, pour un refus, une empreinte salée (scrypt) du mot de passe, jamais
-  le mot de passe ; un nouveau mot de passe est essayé tout de suite.
+  toutes les 6 heures (le bouton de test peut réessayer dès que l'intervalle
+  est écoulé), jusqu'à ce que vous changiez le mot de passe.
+- L'heure de la dernière requête, les pauses, les refus et l'identifiant, le
+  nom et les capteurs de chaque air-Q (rien de secret) survivent à une
+  reconnexion à Gladys et à un redémarrage du conteneur : ils sont gardés
+  dans un fichier sous `/data` avec une empreinte salée (scrypt) du mot de
+  passe, jamais le mot de passe, pour distinguer un nouveau mot de passe
+  (essayé tout de suite) du même. Après un redémarrage, l'onglet Découverte
+  continue d'afficher les appareils jusqu'à la lecture suivante.
 - Une réponse de plus de 256 Ko, ou de plus de 10 secondes, est abandonnée.
 
 ## Dépannage

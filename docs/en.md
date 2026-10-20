@@ -73,11 +73,21 @@ simply not created):
 
 ## How often the air-Q is read
 
-- At a start, `GET /config` (the id and the name of the device) then
-  `GET /average` (or `/data`); then one request per air-Q at each interval.
-  A reconnection to Gladys reads nothing more than what is due.
+- One request per air-Q at each interval: `GET /average` (or `/data`),
+  preceded by `GET /config` (the id and the name of the device) at the first
+  read and after any failure, since the address may then lead to another
+  air-Q.
+- **Never faster than the interval**, counted from the last request sent:
+  not by the test button, a reconnection to Gladys, a saved configuration
+  nor a restart of the container. Only a new address or a new password is
+  read at once. Before the interval has passed, the test button shows the
+  last values and the time of the next possible read.
 - **Read only**: the integration never writes to the air-Q (no
   configuration change, no blink, no restart).
+- **The values belong to the device that measured them**: each answer
+  carries the id of the air-Q; if another air-Q now answers at the address
+  (two devices that swapped their addresses in the router), nothing is
+  published until its id is read again, and then under its own device.
 - A failure (no answer, another HTTP status, an answer that is not the one
   of an air-Q) is tried again at the next interval, never sooner.
 - When the air-Q answers **429 or a 5xx** (busy, restarting), it is left
@@ -85,11 +95,14 @@ simply not created):
   always between 1 minute and 6 hours, and never shorter than the interval.
 - When the **password does not fit** (the answer cannot be opened), the reads
   of that air-Q stop and the status says so; one new try every 6 hours (the
-  test button may try at once), until you change the password.
-- The pauses and the refusals survive a reconnection to Gladys and a restart
-  of the container: they are kept in a file under `/data` with, for a
-  refusal, a salted fingerprint (scrypt) of the password, never the
-  password itself; a new password is tried at once.
+  test button may try as soon as the interval has passed), until you change
+  the password.
+- The instant of the last request, the pauses, the refusals and the id, name
+  and sensors of each air-Q (not secret) survive a reconnection to Gladys
+  and a restart of the container: they are kept in a file under `/data`
+  with a salted fingerprint (scrypt) of the password, never the password
+  itself, to tell a new password (tried at once) from the same one. After a
+  restart, the Discovery tab keeps showing the devices until the next read.
 - An answer larger than 256 KB, or slower than 10 seconds, is abandoned.
 
 ## Troubleshooting

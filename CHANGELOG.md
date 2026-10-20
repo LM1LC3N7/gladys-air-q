@@ -17,13 +17,21 @@ the notes of the version's GitHub Release.
   VOC, PM2.5, PM10, carbon monoxide, nitrogen dioxide, ozone, sulphur
   dioxide, formaldehyde, temperature, humidity, pressure and noise, as the
   model measures them. Read only: nothing is ever changed on the device.
-- Averaged (default) or momentary values, read every 2 minutes by default.
+- Averaged (default) or momentary values, read every 2 minutes by default,
+  never faster: not by the test button, a reconnection, a saved
+  configuration nor a restart (the instant of the last request is kept
+  under `/data`); only a new address or password is read at once.
+- The values are published only under the air-Q that measured them (the id
+  of each answer is checked): two air-Q that swap their addresses never mix
+  their values. The known devices stay in the Discovery tab after a
+  restart.
 - A 429 or 5xx from an air-Q pauses its reads (Retry-After, else 5 minutes
   doubling, between 1 minute and 6 hours); a refused password stops them,
   with one new try every 6 hours until it changes. Both survive a restart
   (kept under `/data` with a salted fingerprint of the password, never the
   password).
 - A connection status that names the air-Q without value and why, and a
-  "Test the air-Q" button that reads them all and shows their values.
+  "Test the air-Q" button that reads those whose interval has passed and
+  shows the last values and the time of the next possible read.
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-air-q/commits/main

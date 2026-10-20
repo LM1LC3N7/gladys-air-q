@@ -249,6 +249,8 @@ test('a device down: tried again at the interval, never sooner; the others go on
   await runMinutes(timers, clock, 1.5);
   assert.equal(tries(), 1);
   answers.config = (c) => airq(c.url.includes('.51/') ? second : CONFIG);
+  answers.average = (c) =>
+    airq(c.url.includes('.51/') ? { ...AVERAGE, DeviceID: second.id } : AVERAGE);
   await runMinutes(timers, clock, 0.5);
   assert.equal(tries(), 2 + 1, '/config then /average');
   assert.equal(gladys.fake.discoveredDevices.length, 2);
@@ -283,14 +285,23 @@ test('the same air-Q at two addresses: one device, the second says so', async ()
   assert.match(gladys.fake.connectionStatus.message.en, /same air-Q as another address/);
 });
 
-test('the test button reads every air-Q, may retry a refused password, shows values', async () => {
-  const { app, gladys, answers } = await setup({ start: false });
+test('the test button never reads before the interval; then it may retry a refused password', async () => {
+  const { app, gladys, answers, clock } = await setup({ start: false });
   answers.config = () => airq(CONFIG, 'other');
   await app.start(BASE);
   assert.equal(calls('config').length, 1);
   answers.config = () => airq(CONFIG);
+  // 30 s later: no request, the last state and the time of the next read.
+  clock.now += 30_000;
+  const early = await app.testConnection();
+  assert.equal(calls('config').length, 1, 'never sooner than the interval');
+  assert.match(early.en, /password refused, next read possible at 18:02 UTC/);
+  assert.match(early.fr, /mot de passe refusé, prochaine lecture possible à 18:02 UTC/);
+  // Once the interval has passed, the button tries the refused password (the
+  // periodic reads would wait 6 hours).
+  clock.now += 90_000;
   const result = await app.testConnection();
-  assert.equal(calls('config').length, 2, 'the button tries the refused password at once');
+  assert.equal(calls('config').length, 2, 'the button tries the refused password');
   assert.match(result.en, /Salon \(air-Q\): CO2 612 ppm/);
   assert.match(result.fr, /température 21,8 °C/);
   assert.equal(gladys.fake.connectionStatus.connected, true);

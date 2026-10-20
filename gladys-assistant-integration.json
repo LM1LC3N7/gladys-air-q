@@ -76,8 +76,8 @@
         "fr": "Intervalle de lecture (minutes)"
       },
       "description": {
-        "en": "Two requests per air-Q at the first read, then one each time.",
-        "fr": "Deux requêtes par air-Q à la première lecture, puis une à chaque fois."
+        "en": "One request per air-Q each time (two when its id is checked again). Nothing reads an air-Q sooner, not even the test button or a restart.",
+        "fr": "Une requête par air-Q à chaque fois (deux quand son identifiant est revérifié). Rien ne le lit plus tôt, ni le bouton de test ni un redémarrage."
       },
       "required": false,
       "default": 2,
@@ -134,8 +134,8 @@
       "timeout_seconds": 120,
       "label": { "en": "Test the air-Q", "fr": "Tester les air-Q" },
       "description": {
-        "en": "Reads every air-Q now (a refused password is tried again) and shows their values.",
-        "fr": "Lit chaque air-Q tout de suite (un mot de passe refusé est réessayé) et affiche leurs valeurs."
+        "en": "Reads each air-Q whose interval has passed (a refused password is tried again then) and shows the last values and when the next read can happen.",
+        "fr": "Lit chaque air-Q dont l'intervalle est écoulé (un mot de passe refusé est alors réessayé) et affiche les dernières valeurs et l'heure de la prochaine lecture possible."
       }
     }
   ]

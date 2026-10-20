@@ -24,12 +24,15 @@ Gladys ⇄ SDK ⇄ src/app.js (AirQApp)   what is due, pauses, devices, states, 
   the content is AES-256-CBC (IV in front, PKCS#7) with a key taken from the
   device password ("0"-padded or cut to 32 bytes). A content that does not
   open means a wrong password.
-- **Reads**: `/config` once (id, name), then `/average` (or `/data`) every
-  2 minutes by default.
+- **Reads**: `/average` (or `/data`) every 2 minutes by default, after
+  `/config` (id, name) at the first read and after any failure; the
+  `DeviceID` of each answer must match. Never faster than the interval
+  since the last request (persisted), test button and restarts included.
 - **Pauses**: 429/5xx → `Retry-After`, else 5 minutes doubling, between
   1 minute and 6 hours; a refused password → one try every 6 hours (or at
-  once with a new password). Both persisted in `/data/air-q-state.json`
-  with a salted scrypt fingerprint of the password, never the password.
+  once with a new password). Persisted in `/data/air-q-state.json` with the
+  last request, the device info and a salted scrypt fingerprint of the
+  password, never the password.
 - **Devices**: one per air-Q, external id `airq:<device id>`, then the air-Q
   field (`co2`, `tvoc`, `pm2_5`, `co`, `sound`...). A feature once created is
   never dropped from the Discovery list.

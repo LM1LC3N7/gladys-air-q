@@ -58,7 +58,7 @@ export class AirQApp {
     });
     /** The configured air-Q: [{ slot, address, password, cipher }]. */
     this.slots = [];
-    /** address -> { info, values, warming, readAt, fields, nextDue, error, password } */
+    /** address -> { info, confirmed, values, warming, readAt, fields, nextDue, error } */
     this.track = new Map();
     this.interval = undefined;
     this.ticking = undefined;
@@ -74,12 +74,8 @@ export class AirQApp {
   async start(raw = {}) {
     this.stop();
     const generation = ++this.generation;
-    const previous = this.started ? this.config : undefined;
     this.config = normalizeConfig(raw);
     this.started = true;
-    const routeChanged =
-      previous &&
-      (previous.values !== this.config.values || previous.pollMinutes !== this.config.pollMinutes);
     this.slots = this.config.devices.map((device) => ({
       ...device,
       cipher: createCipher(device.password),
@@ -92,24 +88,32 @@ export class AirQApp {
     }
     this.store.keep(addresses);
     for (const slot of this.slots) {
+      // The store drops the refusal and the last request of another password
+      // (in this process or before a restart): a new password, like a new
+      // address, is tried at once. Anything else (a reconnection to Gladys,
+      // a restart of the container, a new interval) keeps the pace: the next
+      // read is never before the last request + the interval.
+      const { entry: saved, passwordChanged } = this.store.restore(slot.address, slot.password);
       let entry = this.track.get(slot.address);
       if (!entry) {
-        entry = { fields: new Set(), nextDue: 0 };
+        // After a restart: the device known before (id, name, fields, not
+        // secret) keeps the Discovery list filled until the next read.
+        entry = { fields: new Set(saved.fields), info: saved.info, confirmed: false, nextDue: 0 };
         this.track.set(slot.address, entry);
       }
-      // A reconnection to Gladys gives the same configuration: the pauses,
-      // the refusal and the due times stay. A new password is tried at once
-      // (the store drops a refusal of another password, also after a
-      // restart of the container).
-      const saved = this.store.restore(slot.address, slot.password);
-      if (entry.password !== undefined && entry.password !== slot.password) {
-        this.store.update(slot.address, { refusedUntil: 0 });
-        entry.nextDue = 0;
+      if (passwordChanged) {
+        // Another password may reach another device: /config is read again.
+        entry.confirmed = false;
         entry.error = undefined;
-      } else if (routeChanged) {
-        entry.nextDue = Math.min(entry.nextDue, Math.max(this.now(), saved.pausedUntil));
       }
-      entry.password = slot.password;
+      // After a restart, the status says at once that an air-Q is refused or
+      // paused, without asking it.
+      if (!entry.error && saved.refusedUntil > this.now()) {
+        entry.error = new AirQError('refused');
+      } else if (!entry.error && saved.pausedUntil > this.now()) {
+        entry.error = new AirQError('busy');
+      }
+      entry.nextDue = this.earliestRead(slot.address);
     }
     // Gladys keeps the status and the Discovery list in memory only: a
     // (re)connection may follow a restart of the core, so both are published
@@ -196,6 +200,12 @@ export class AirQApp {
     return this.config.pollMinutes * 60_000;
   }
 
+  /** The earliest periodic read of an address: interval, pause and refusal kept. */
+  earliestRead(address) {
+    const saved = this.store.get(address);
+    return Math.max(saved.lastAttemptAt + this.intervalMs(), saved.pausedUntil, saved.refusedUntil);
+  }
+
   /** Values read recently enough to be published as current. */
   isFresh(entry, now) {
     return Boolean(entry?.values) && now - entry.readAt <= Math.max(STALE, 2 * this.intervalMs());
@@ -210,42 +220,68 @@ export class AirQApp {
   }
 
   /**
-   * Read one air-Q now; never throws. `manual` (the test button) may try a
-   * refused password again at once, never during a pause asked by the device.
+   * Read one air-Q if its interval has passed; never throws. Nothing, not
+   * even the test button (`manual`), reads an air-Q before its last request
+   * + the interval, nor during a pause asked by the device; `manual` may try
+   * a refused password again once the interval has passed. Returns whether a
+   * request was sent.
    */
   async read(slot, { manual = false } = {}) {
     const generation = this.generation;
     const entry = this.track.get(slot.address);
     if (!entry) {
-      return;
+      return false;
     }
-    const saved = this.store.get(slot.address) ?? {};
+    const saved = this.store.get(slot.address);
     const now = this.now();
-    if (now < (saved.pausedUntil ?? 0)) {
-      entry.error = entry.error ?? new AirQError('busy');
-      entry.nextDue = Math.max(entry.nextDue, saved.pausedUntil);
-      return;
+    const earliest = Math.max(saved.lastAttemptAt + this.intervalMs(), saved.pausedUntil);
+    if (now < earliest) {
+      if (now < saved.pausedUntil) {
+        entry.error = entry.error ?? new AirQError('busy');
+      }
+      entry.nextDue = Math.max(entry.nextDue, this.earliestRead(slot.address));
+      return false;
     }
-    if (!manual && now < (saved.refusedUntil ?? 0)) {
+    if (!manual && now < saved.refusedUntil) {
       entry.error = new AirQError('refused');
       entry.nextDue = Math.max(entry.nextDue, saved.refusedUntil);
-      return;
+      return false;
     }
+    // The request may leave now: recorded first (and persisted), so neither a
+    // reconnection, a saved configuration nor a restart reads again sooner.
+    this.store.update(slot.address, { lastAttemptAt: now });
+    entry.nextDue = now + this.intervalMs();
+    const current = () => generation === this.generation;
     try {
-      if (!entry.info) {
+      if (!entry.confirmed || !entry.info) {
         const info = deviceInfo(await readRoute(slot.address, slot.cipher, ROUTES.CONFIG));
-        if (generation !== this.generation) {
-          return;
+        if (!current()) {
+          return true;
+        }
+        if (entry.info && entry.info.id !== info.id) {
+          // Another air-Q answers at this address (addresses swapped by the
+          // router): it is its own device, never the first one.
+          entry.fields = new Set();
+          entry.values = undefined;
         }
         entry.info = info;
+        entry.confirmed = true;
+        this.store.update(slot.address, { info, fields: [...entry.fields] });
       }
       if (this.duplicateOf(slot, entry.info.id)) {
         throw new AirQError('duplicate');
       }
       const route = this.config.values === 'momentary' ? ROUTES.DATA : ROUTES.AVERAGE;
       const document = await readRoute(slot.address, slot.cipher, route);
-      if (generation !== this.generation) {
-        return;
+      if (!current()) {
+        return true;
+      }
+      // The values carry the id of the device that measured them: a mismatch
+      // (another air-Q took the address since /config) publishes nothing.
+      const deviceId =
+        typeof document.DeviceID === 'string' ? document.DeviceID.trim().toLowerCase() : '';
+      if (deviceId && deviceId !== entry.info.id) {
+        throw new AirQError('invalid', 'another air-Q at this address');
       }
       entry.values = valuesOf(document);
       entry.warming = warmingUp(document);
@@ -254,35 +290,55 @@ export class AirQApp {
         entry.fields.add(field);
       }
       entry.error = undefined;
-      this.store.update(slot.address, { pausedUntil: 0, streak: 0, refusedUntil: 0 });
-      entry.nextDue = this.now() + this.intervalMs();
+      this.store.update(slot.address, {
+        pausedUntil: 0,
+        streak: 0,
+        refusedUntil: 0,
+        fields: [...entry.fields],
+      });
     } catch (err) {
-      // The outcome of a read of a previous configuration (another password)
-      // never touches the state of the current one.
-      if (generation !== this.generation) {
-        return;
-      }
       const error = err instanceof AirQError ? err : new AirQError('failed');
-      entry.error = error;
       const at = this.now();
+      if (!current()) {
+        // Disconnected (or reconfigured) meanwhile: the values and a refusal
+        // are dropped, but a pause asked by the same device, with the same
+        // password, is kept.
+        const same = this.slots.some(
+          (s) => s.address === slot.address && s.password === slot.password,
+        );
+        if (error.kind === 'busy' && same) {
+          this.recordBusy(slot, entry, error, at);
+        }
+        return true;
+      }
+      entry.error = error;
+      // Whatever failed, /config is read again at the next attempt: the
+      // address may now lead to another air-Q.
+      entry.confirmed = false;
+      if (error.kind === 'invalid') {
+        entry.values = undefined;
+      }
       if (error.kind === 'refused') {
-        this.store.update(slot.address, { refusedUntil: at + REFUSED_BACKOFF }, slot.password);
+        this.store.update(slot.address, { refusedUntil: at + REFUSED_BACKOFF });
         entry.nextDue = at + REFUSED_BACKOFF;
       } else if (error.kind === 'busy') {
-        const streak = (saved.streak ?? 0) + 1;
-        const pause = clamp(
-          error.retryAfterMs ?? BUSY_BASE * 2 ** Math.min(streak - 1, 10),
-          BUSY_MIN,
-          BUSY_MAX,
-        );
-        this.store.update(slot.address, { streak, pausedUntil: at + pause });
-        entry.nextDue = at + Math.max(this.intervalMs(), pause);
-      } else {
-        // Never read faster than the interval, whatever the failure.
-        entry.nextDue = at + this.intervalMs();
+        this.recordBusy(slot, entry, error, at);
       }
       this.logger.warn(`air-Q ${slot.slot} (${slot.address}): ${this.scrub(error)}`);
     }
+    return true;
+  }
+
+  /** A 429 / 5xx: Retry-After, else 5 minutes doubling; 1 minute to 6 hours. */
+  recordBusy(slot, entry, error, at) {
+    const streak = this.store.get(slot.address).streak + 1;
+    const pause = clamp(
+      error.retryAfterMs ?? BUSY_BASE * 2 ** Math.min(streak - 1, 10),
+      BUSY_MIN,
+      BUSY_MAX,
+    );
+    this.store.update(slot.address, { streak, pausedUntil: at + pause });
+    entry.nextDue = at + Math.max(this.intervalMs(), pause);
   }
 
   // --- Gladys devices and states --------------------------------------------------
@@ -419,14 +475,14 @@ export class AirQApp {
       const why = entry?.error
         ? reason(entry.error.kind)[lang]
         : lang === 'fr'
-          ? 'pas encore lu'
-          : 'not read yet';
+          ? 'pas encore lu depuis le démarrage'
+          : 'not read since the start';
       const saved = this.store.get(slot.address);
       const until =
         entry?.error?.kind === 'busy' && saved?.pausedUntil > this.now()
           ? `, ${T.pausedUntil(saved.pausedUntil)[lang]}`
           : '';
-      return `- ${name}${colon} ${why}${until}`;
+      return `- ${name}${colon} ${why}${until}${this.nextRead(slot, lang)}`;
     }
     const parts = [];
     const add = (field, label, unit) => {
@@ -449,7 +505,17 @@ export class AirQApp {
           : `warming up: ${entry.warming.join(', ')}`,
       );
     }
-    return `- ${name}${colon} ${parts.join(', ')}`;
+    return `- ${name}${colon} ${parts.join(', ')}${this.nextRead(slot, lang)}`;
+  }
+
+  /**
+   * ", next read possible at 18:02 UTC": the button never reads sooner (the
+   * periodic reads of a refused password wait longer, see the status).
+   */
+  nextRead(slot, lang) {
+    const saved = this.store.get(slot.address);
+    const at = Math.max(saved.lastAttemptAt + this.intervalMs(), saved.pausedUntil, this.now());
+    return `, ${T.nextRead(at)[lang]}`;
   }
 
   async testConnection() {

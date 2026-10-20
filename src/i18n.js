@@ -40,6 +40,10 @@ export const T = {
     en: 'A refused password stops the reads of that air-Q: check the password of the device (the one of the air-Q app); one new try every 6 hours until it changes.',
     fr: "Un mot de passe refusé arrête les lectures de cet air-Q : vérifiez le mot de passe de l'appareil (celui de l'application air-Q) ; un nouvel essai toutes les 6 heures jusqu'à ce qu'il change.",
   },
+  nextRead: (at) => ({
+    en: `next read possible at ${utcTime(at)}`,
+    fr: `prochaine lecture possible à ${utcTime(at)}`,
+  }),
   pausedUntil: (until) => ({
     en: `paused until ${utcTime(until)}`,
     fr: `en pause jusqu'à ${utcTime(until)}`,
