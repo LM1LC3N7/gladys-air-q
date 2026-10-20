@@ -97,8 +97,10 @@
   the button answers with the last values and the time of the next possible
   read), a reconnection, a saved configuration (the next read is
   recomputed from the last request and the new interval) nor a restart.
-  Only a new address or a new password (told apart after a restart by its
-  fingerprint) is read at once.
+  Only a new address or a new password is read at once: told apart in
+  memory while the process runs; after a restart, only against a password
+  still refused (review 2, I3), so a password changed while the container
+  was stopped waits at most one interval.
 - **Identity of the values (review 1, I2)**: `/config` is read at the first
   read and again after any failure (the address may lead to another air-Q
   after a power cut, two devices swapping their DHCP addresses); the
@@ -106,7 +108,8 @@
   device, else nothing is published, the read counts as a failure and
   `/config` is read at the next attempt (within the interval). An address
   that now leads to another id becomes that device (fields reset), never
-  the first one.
+  the first one. An address giving the same id as an earlier one
+  ("same air-Q") keeps its checked id and sends no further request (M5).
 - **Disconnection during a read (review 1, M1)**: the attempt is recorded
   anyway; a 429/5xx answered meanwhile is kept when the address and the
   password are unchanged; only the values and a refusal are dropped.
@@ -122,9 +125,12 @@
   streak, the end of the refusal, the device info (id, name, model,
   software version) and its fields (not secret: the Discovery list is not
   empty after a restart, and the status is "connected" after a restart that
-  follows a success), and a salted scrypt fingerprint of the configured
-  password (16 bytes, a random salt per file) to tell a new password from
-  the same one after a restart. Never the password. Times read back are
+  follows a success), and, only while a password is refused, a salted
+  scrypt fingerprint of that refused (wrong) password (16 bytes, a random
+  salt per file), erased by the first successful read, dropped when read
+  back after the refusal ended (review 2, I3: nothing in the file can
+  confirm a working password offline; tested). Never the password. Times
+  read back are
   capped (a last request never in the future, a pause at most 6 h), the
   info and fields are re-validated. Written atomically, once per request
   at most; an unreadable file is warned once and ignored; a write failure
@@ -135,7 +141,8 @@
 - **Secrets**: the password is described as "kept by Gladys in its database,
   never shown again"; it never leaves the integration (it only opens the
   answers), is never logged (messages scrubbed as well), never in `/data`
-  (its salted fingerprint only), a status or an error. The docs never call
+  (only the fingerprint of a refused password, while refused), a status or
+  an error. The docs never call
   a secret field "encrypted".
 - **Bounded answers**: 256 KB, 10 s per request; error messages carry the
   host and a short reason only.

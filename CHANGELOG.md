@@ -28,8 +28,8 @@ the notes of the version's GitHub Release.
 - A 429 or 5xx from an air-Q pauses its reads (Retry-After, else 5 minutes
   doubling, between 1 minute and 6 hours); a refused password stops them,
   with one new try every 6 hours until it changes. Both survive a restart
-  (kept under `/data` with a salted fingerprint of the password, never the
-  password).
+  (kept under `/data`, never the password; only while a password is
+  refused, a salted fingerprint of that wrong password).
 - A connection status that names the air-Q without value and why, and a
   "Test the air-Q" button that reads those whose interval has passed and
   shows the last values and the time of the next possible read.

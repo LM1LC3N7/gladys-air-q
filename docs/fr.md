@@ -108,10 +108,15 @@ n'envoie pas n'est simplement pas créée) :
 - L'heure de la dernière requête, les pauses, les refus et l'identifiant, le
   nom et les capteurs de chaque air-Q (rien de secret) survivent à une
   reconnexion à Gladys et à un redémarrage du conteneur : ils sont gardés
-  dans un fichier sous `/data` avec une empreinte salée (scrypt) du mot de
-  passe, jamais le mot de passe, pour distinguer un nouveau mot de passe
-  (essayé tout de suite) du même. Après un redémarrage, l'onglet Découverte
-  continue d'afficher les appareils jusqu'à la lecture suivante.
+  dans un fichier sous `/data`, jamais le mot de passe. Seulement pendant
+  qu'un mot de passe est refusé, le fichier garde une empreinte salée
+  (scrypt) de ce mot de passe faux, pour qu'après un redémarrage un nouveau
+  mot de passe soit essayé tout de suite ; elle est effacée dès la première
+  lecture réussie : rien dans le fichier ne permet de confirmer un mot de
+  passe qui fonctionne. Un nouveau mot de passe est essayé tout de suite
+  pendant que l'intégration tourne ; un mot de passe changé conteneur
+  arrêté attend au plus un intervalle. Après un redémarrage, l'onglet
+  Découverte continue d'afficher les appareils jusqu'à la lecture suivante.
 - Une réponse de plus de 256 Ko, ou de plus de 10 secondes, est abandonnée.
 
 ## Dépannage

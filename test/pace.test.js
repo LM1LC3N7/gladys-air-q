@@ -236,3 +236,52 @@ test('H6 two air-Q swap their addresses: values never published under the other 
   assert.equal(gladys.fake.lastState(`${DEVICE}:co2`), 650);
   assert.equal(gladys.fake.lastState(`ext:air-q:airq:${OTHER.id}:co2`), 2100);
 });
+
+test('I3 /data never holds a fingerprint of a password that works', async () => {
+  const storage = memoryStorage();
+  const clock = { now: NOW };
+  const fps = () => Object.values(storage.load()?.devices ?? {}).map((d) => d.fp);
+  // A successful read: no fingerprint at all.
+  const first = await setup({ storage, clock });
+  await first.app.start(BASE);
+  assert.equal(calls('average').length, 1);
+  assert.deepEqual(fps(), ['']);
+  // A refused password: the fingerprint of that wrong password only.
+  clock.now += 2 * 60_000;
+  first.answers.config = () => airq(CONFIG, 'the real one');
+  await first.app.start({ ...BASE, airq_1_password: 'wrong one' });
+  assert.equal(calls('config').length, 2);
+  assert.match(fps()[0], /^[0-9a-f]{32}$/);
+  // The right password: read at once, the fingerprint erased.
+  first.answers.average = () => airq(AVERAGE, 'the real one');
+  await first.app.start({ ...BASE, airq_1_password: 'the real one' });
+  assert.equal(calls('average').length, 2);
+  assert.deepEqual(fps(), ['']);
+  first.app.stop();
+  fake.restore();
+  // A restart with another password and no refusal: the pace is kept (at
+  // most one interval), since nothing in /data names the old password.
+  clock.now += 30_000;
+  const second = await setup({ storage, clock });
+  second.answers.config = () => airq(CONFIG, 'changed while stopped');
+  second.answers.average = () => airq(AVERAGE, 'changed while stopped');
+  await second.app.start({ ...BASE, airq_1_password: 'changed while stopped' });
+  assert.equal(fake.calls.length, 0);
+  clock.now += 90_000;
+  await second.timers.runIntervals();
+  assert.equal(calls('average').length, 1);
+  assert.deepEqual(fps(), ['']);
+});
+
+test('M5 an address that leads to the same air-Q as another sends no request after the first', async () => {
+  const config = { ...BASE, airq_2_address: '192.168.1.51', airq_2_password: PASSWORD };
+  const { app, timers, clock } = await setup({ config });
+  await app.start(config);
+  const second = () => fake.calls.filter((c) => c.url.includes('.51/')).length;
+  assert.equal(second(), 1, '/config only, then "same air-Q"');
+  for (let i = 0; i < (10 * 60_000) / TICK; i += 1) {
+    clock.now += TICK;
+    await timers.runIntervals();
+  }
+  assert.equal(second(), 1);
+});

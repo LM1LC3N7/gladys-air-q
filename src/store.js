@@ -6,10 +6,11 @@
 // and the fields of the device (not secret), so the Discovery list is not
 // empty after a restart.
 //
-// The password is never written. To know, after a restart, whether it is
-// still the same password (a refusal kept, the interval kept) or a new one
-// (tried at once), the file keeps a salted scrypt fingerprint of it (16 bytes,
-// a random salt per file), never the password.
+// The password is never written. Only while a password is refused, the file
+// keeps a salted scrypt fingerprint (16 bytes, a random salt per file) of
+// that refused, wrong password, to know after a restart whether the refusal
+// still concerns the configured one; it is erased by the first successful
+// read. Nothing in the file can confirm a password that works.
 // -----------------------------------------------------------------------------
 
 import { randomBytes, scryptSync } from 'node:crypto';
@@ -148,7 +149,10 @@ export class DeviceStore {
         pausedUntil: Math.min(finite(entry.pausedUntil), at + maxPause),
         streak: Math.min(Math.max(0, Math.floor(finite(entry.streak))), 20),
         refusedUntil: Math.min(finite(entry.refusedUntil), at + maxRefusal),
-        fp: typeof entry.fp === 'string' ? entry.fp.slice(0, 64) : '',
+        fp:
+          typeof entry.fp === 'string' && finite(entry.refusedUntil) > at
+            ? entry.fp.slice(0, 64)
+            : '',
         info: infoOf(entry.info),
         fields: fieldsOf(entry.fields),
       });
@@ -165,36 +169,53 @@ export class DeviceStore {
   }
 
   /**
-   * The saved state of an address for the configured password. Another
-   * password than the one saved (in this process or before a restart) drops
-   * the refusal and the instant of the last request: a new password is tried
-   * at once. Returns `{ entry, passwordChanged }`.
+   * The saved state of an address for the configured password. A new
+   * password drops the refusal and the instant of the last request (tried at
+   * once): told apart in memory while the process runs; after a restart,
+   * only a refused password is known (its fingerprint), so a password
+   * changed while the container was stopped waits at most one interval.
+   * Returns `{ entry, passwordChanged }`.
    */
   restore(address, password) {
     const entry = { ...EMPTY, ...this.entries.get(address) };
-    // scrypt costs a few tens of milliseconds: computed once per password.
-    const cached = this.fpCache?.get(address);
-    const fp = cached?.password === password ? cached.fp : this.fingerprint(address, password);
-    this.fpCache = this.fpCache ?? new Map();
-    this.fpCache.set(address, { password, fp });
-    const passwordChanged = entry.fp !== '' && entry.fp !== fp;
+    this.passwords = this.passwords ?? new Map();
+    let passwordChanged = false;
+    if (this.passwords.has(address)) {
+      passwordChanged = this.passwords.get(address) !== password;
+    } else if (entry.fp && entry.refusedUntil > this.now()) {
+      passwordChanged = entry.fp !== this.fingerprint(address, password);
+    }
+    this.passwords.set(address, password);
+    const before = JSON.stringify(entry);
     if (passwordChanged) {
       entry.refusedUntil = 0;
       entry.lastAttemptAt = 0;
     }
-    const changed = entry.fp !== fp || passwordChanged;
-    entry.fp = fp;
+    if (entry.refusedUntil <= this.now()) {
+      // The fingerprint only ever names a refused (wrong) password, and only
+      // while the refusal lasts: never one that works.
+      entry.fp = '';
+    }
     this.entries.set(address, entry);
-    if (changed) {
+    if (JSON.stringify(entry) !== before) {
       this.save();
     }
     return { entry, passwordChanged };
   }
 
-  /** Update an address and write the file, only when something changed. */
-  update(address, changes) {
+  /**
+   * Update an address and write the file, only when something changed. A
+   * refusal (`refusedUntil` > 0, with the refused `password`) keeps the
+   * fingerprint of that password; anything else erases it.
+   */
+  update(address, changes, password) {
     const entry = { ...EMPTY, ...this.entries.get(address) };
     const next = { ...entry, ...changes };
+    if (changes.refusedUntil > 0 && password !== undefined) {
+      next.fp = this.fingerprint(address, password);
+    } else if (!(next.refusedUntil > this.now())) {
+      next.fp = '';
+    }
     this.entries.set(address, next);
     if (JSON.stringify(next) !== JSON.stringify(entry)) {
       this.save();

@@ -31,8 +31,9 @@ Gladys ⇄ SDK ⇄ src/app.js (AirQApp)   what is due, pauses, devices, states, 
 - **Pauses**: 429/5xx → `Retry-After`, else 5 minutes doubling, between
   1 minute and 6 hours; a refused password → one try every 6 hours (or at
   once with a new password). Persisted in `/data/air-q-state.json` with the
-  last request, the device info and a salted scrypt fingerprint of the
-  password, never the password.
+  last request and the device info, never the password (only while a
+  password is refused, a salted scrypt fingerprint of that wrong password,
+  erased by the first successful read).
 - **Devices**: one per air-Q, external id `airq:<device id>`, then the air-Q
   field (`co2`, `tvoc`, `pm2_5`, `co`, `sound`...). A feature once created is
   never dropped from the Discovery list.

@@ -99,10 +99,14 @@ simply not created):
   the password.
 - The instant of the last request, the pauses, the refusals and the id, name
   and sensors of each air-Q (not secret) survive a reconnection to Gladys
-  and a restart of the container: they are kept in a file under `/data`
-  with a salted fingerprint (scrypt) of the password, never the password
-  itself, to tell a new password (tried at once) from the same one. After a
-  restart, the Discovery tab keeps showing the devices until the next read.
+  and a restart of the container: they are kept in a file under `/data`,
+  never the password. Only while a password is refused, the file keeps a
+  salted fingerprint (scrypt) of that wrong password, so that after a
+  restart a new password is tried at once; it is erased by the first read
+  that works, so nothing in the file can confirm a working password. A new
+  password is tried at once while the integration runs; one changed while
+  the container was stopped waits at most one interval. After a restart,
+  the Discovery tab keeps showing the devices until the next read.
 - An answer larger than 256 KB, or slower than 10 seconds, is abandoned.
 
 ## Troubleshooting

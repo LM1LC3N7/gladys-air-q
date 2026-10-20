@@ -89,10 +89,11 @@ export class AirQApp {
     this.store.keep(addresses);
     for (const slot of this.slots) {
       // The store drops the refusal and the last request of another password
-      // (in this process or before a restart): a new password, like a new
-      // address, is tried at once. Anything else (a reconnection to Gladys,
-      // a restart of the container, a new interval) keeps the pace: the next
-      // read is never before the last request + the interval.
+      // (seen in memory while the process runs, or after a restart against
+      // the fingerprint of a password still refused): a new password, like a
+      // new address, is tried at once. Anything else (a reconnection to
+      // Gladys, a restart of the container, a new interval) keeps the pace:
+      // the next read is never before the last request + the interval.
       const { entry: saved, passwordChanged } = this.store.restore(slot.address, slot.password);
       let entry = this.track.get(slot.address);
       if (!entry) {
@@ -313,13 +314,18 @@ export class AirQApp {
       }
       entry.error = error;
       // Whatever failed, /config is read again at the next attempt: the
-      // address may now lead to another air-Q.
-      entry.confirmed = false;
+      // address may now lead to another air-Q. Not for a duplicate: its
+      // /config was just read and gave the id of another configured address.
+      if (error.kind !== 'duplicate') {
+        entry.confirmed = false;
+      }
       if (error.kind === 'invalid') {
         entry.values = undefined;
       }
       if (error.kind === 'refused') {
-        this.store.update(slot.address, { refusedUntil: at + REFUSED_BACKOFF });
+        // The fingerprint of this refused (wrong) password is kept only
+        // while the refusal lasts.
+        this.store.update(slot.address, { refusedUntil: at + REFUSED_BACKOFF }, slot.password);
         entry.nextDue = at + REFUSED_BACKOFF;
       } else if (error.kind === 'busy') {
         this.recordBusy(slot, entry, error, at);
