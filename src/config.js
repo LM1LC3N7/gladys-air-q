@@ -1,45 +1,100 @@
 // -----------------------------------------------------------------------------
-// Integration configuration.
-//
-// The configuration is filled in by the user in Gladys, from the `config_schema`
-// declared in `gladys-assistant-integration.json`. The SDK fetches it for you
-// (`gladys.getConfig()`) and notifies you of every change through
-// `gladys.onConfigUpdated()`.
-//
-// This module only provides defaults and normalizes the received object, so the
-// rest of the code never has to deal with `undefined`.
+// The configuration the user fills (manifest `config_schema`), normalized so
+// the rest of the code never deals with strings or `undefined`.
 // -----------------------------------------------------------------------------
 
-// Defaults: they MUST stay consistent with the `default` values declared in the
-// `config_schema` of the manifest.
+import { MAX_DEVICES } from './constants.js';
+
+// Defaults: they MUST match the `default` values of the manifest
+// (test/manifest.test.js checks it).
 export const DEFAULT_CONFIG = {
-  latitude: 48.8566, // Paris
-  longitude: 2.3522,
-  unit: 'celsius', // 'celsius' | 'fahrenheit'
-  // Seconds between two reads of the polled sensors. Gladys polls at most once
-  // a minute: slower intervals are applied by skipping polls (see
-  // createPoller in src/devices/index.js).
-  poll_frequency: 300,
-  // Reserved key (NOT in config_schema): because the manifest declares both
-  // 'local' and 'cloud' in its `transports` field, Gladys shows a standard
-  // "Prefer the local connection" toggle and sends the user's choice here.
-  // Read-only for the integration; defaults to true.
-  GLADYS_PREFER_LOCAL: true,
+  values: 'average',
+  poll_interval: 2,
 };
 
+const VALUES = ['average', 'momentary'];
+
+const number = (value, fallback, min, max) => {
+  const n = Number(value);
+  return value !== '' && value !== null && value !== undefined && Number.isFinite(n)
+    ? Math.min(max, Math.max(min, Math.round(n)))
+    : fallback;
+};
+
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+// Underscores are allowed: the air-Q announces itself as `<id>_air-q.local`.
+const LABEL = /^[a-z0-9_]([a-z0-9_-]{0,62})$/;
+
 /**
- * Merge the user config with the defaults.
- * @param {Record<string, unknown>} raw config returned by the SDK
+ * The address of an air-Q as the user may type it: an IPv4 address or a host
+ * name, with an optional port, or the 5-character id printed on the device
+ * (expanded to `<id>_air-q.local`, as aioairq does). A leading `http://` and a
+ * trailing `/` are tolerated; anything else (a path, credentials, IPv6, which
+ * the air-Q does not support) is refused. Returns the `host[:port]`, or null.
+ */
+export function parseAddress(text) {
+  let value = clean(text)
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  if (!value) {
+    return null;
+  }
+  if (/^[0-9a-f]{5}$/.test(value)) {
+    return `${value}_air-q.local`;
+  }
+  let port = '';
+  const colon = value.lastIndexOf(':');
+  if (colon !== -1) {
+    port = value.slice(colon + 1);
+    value = value.slice(0, colon);
+    const n = Number(port);
+    if (!/^\d{1,5}$/.test(port) || n < 1 || n > 65535) {
+      return null;
+    }
+    port = `:${n}`;
+  }
+  if (value.length > 253) {
+    return null;
+  }
+  const labels = value.split('.');
+  const ok = IPV4.test(value) || (!/^[\d.]+$/.test(value) && labels.every((l) => LABEL.test(l)));
+  return ok ? `${value}${port}` : null;
+}
+
+/**
+ * The air-Q of the configuration: `airq_<n>_address` and `airq_<n>_password`.
+ * A slot with an address but no password, or an address that does not parse,
+ * is reported (by its number only, never its content).
  */
 export function normalizeConfig(raw = {}) {
+  const devices = [];
+  const invalid = [];
+  const seen = new Set();
+  for (let n = 1; n <= MAX_DEVICES; n += 1) {
+    const text = clean(raw[`airq_${n}_address`]);
+    const password = typeof raw[`airq_${n}_password`] === 'string' ? raw[`airq_${n}_password`] : '';
+    if (!text) {
+      continue;
+    }
+    const address = parseAddress(text);
+    if (!address || !password) {
+      invalid.push({ slot: n, why: address ? 'password' : 'address' });
+      continue;
+    }
+    if (seen.has(address)) {
+      invalid.push({ slot: n, why: 'duplicate' });
+      continue;
+    }
+    seen.add(address);
+    devices.push({ slot: n, address, password });
+  }
   return {
-    ...DEFAULT_CONFIG,
-    ...raw,
-    // Force the types: config may arrive as strings from a form.
-    latitude: Number(raw.latitude ?? DEFAULT_CONFIG.latitude),
-    longitude: Number(raw.longitude ?? DEFAULT_CONFIG.longitude),
-    poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
-    // The preference is a boolean; anything but an explicit false means true.
-    GLADYS_PREFER_LOCAL: raw.GLADYS_PREFER_LOCAL !== false,
+    devices,
+    invalid,
+    values: VALUES.includes(raw.values) ? raw.values : DEFAULT_CONFIG.values,
+    pollMinutes: number(raw.poll_interval, DEFAULT_CONFIG.poll_interval, 1, 60),
   };
 }

@@ -1,8 +1,8 @@
 {
-  "name": "gladys-integration-template-js",
-  "version": "1.0.0",
+  "name": "gladys-air-q",
+  "version": "0.1.0",
   "private": true,
-  "description": "Official starter template to build an external integration for Gladys Assistant with the JavaScript SDK.",
+  "description": "air-Q for Gladys Assistant: the air of your rooms (CO2, VOC, particulate matter, gases, noise, temperature, humidity, pressure) read from your air-Q sensors over the local network.",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -10,10 +10,15 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test"
+    "test": "node --test",
+    "audit": "npm audit --omit=dev"
   },
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LM1LC3N7/gladys-air-q.git"
   },
   "dependencies": {
     "@gladysassistant/integration-sdk": "^0.15.0"
