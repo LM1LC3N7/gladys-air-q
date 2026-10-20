@@ -1,6 +1,6 @@
 {
   "name": "gladys-air-q",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "air-Q for Gladys Assistant: the air of your rooms (CO2, VOC, particulate matter, gases, noise, temperature, humidity, pressure) read from your air-Q sensors over the local network.",
   "type": "module",
