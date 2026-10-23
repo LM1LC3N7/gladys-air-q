@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-23
+
 ## [0.1.1] - 2026-10-20
 
 ### Added
@@ -36,5 +38,6 @@ the notes of the version's GitHub Release.
   "Test the air-Q" button that reads those whose interval has passed and
   shows the last values and the time of the next possible read.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-air-q/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-air-q/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-air-q/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-air-q/releases/tag/v0.1.1
