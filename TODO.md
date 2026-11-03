@@ -40,6 +40,10 @@
 
 ## Decisions
 
+- **SDK `^0.16.0`** (2026-11-03, migration wave 5): it adds the ai, tts and
+  music types; no effect here (`poll_frequency` unused, the devices carry
+  `should_poll: false`). `keywords`, `countries` and
+  `gladys_version >= 5.3.0` wait until Gladys 5.3 is widespread.
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag (`ghcr.io/lm1lc3n7/gladys-air-q:0.1.0`);
   the first patch release gives 0.1.1.
